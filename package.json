@@ -1,0 +1,26 @@
+{
+  "name": "daily-job-updates",
+  "private": true,
+  "version": "1.0.0",
+  "description": "AI-powered job discovery and aggregation portal",
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "db:local": "node scripts/local-db.mjs",
+    "db:migrate": "pnpm --filter @jobs/api db:migrate",
+    "db:deploy": "pnpm --filter @jobs/api db:deploy",
+    "db:seed": "pnpm --filter @jobs/api db:seed",
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "pnpm --filter @jobs/api dev",
+    "dev:web": "pnpm --filter @jobs/web dev",
+    "build": "pnpm --filter @jobs/api build && pnpm --filter @jobs/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @jobs/web test:e2e"
+  },
+  "devDependencies": {
+    "embedded-postgres": "17.12.0-beta.19"
+  }
+}

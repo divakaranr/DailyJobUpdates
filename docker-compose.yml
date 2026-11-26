@@ -1,0 +1,65 @@
+# Full stack: PostgreSQL + Redis + API + extraction worker + web.
+#   cp .env.example .env   # set JWT_SECRET and (optionally) LLM API keys
+#   docker compose up --build
+#   docker compose exec api node dist/seed.js    # first run: admin user, taxonomy, sample jobs
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jobportal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobportal}
+      POSTGRES_DB: jobportal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobportal"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    environment: &api-env
+      NODE_ENV: production
+      DATABASE_URL: postgresql://jobportal:${POSTGRES_PASSWORD:-jobportal}@postgres:5432/jobportal
+      REDIS_URL: redis://redis:6379
+      RUN_WORKER_IN_PROCESS: "false"
+      APP_ORIGINS: ${PUBLIC_URL:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports: ["4000:4000"]
+
+  worker:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    env_file: .env
+    environment: *api-env
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      api: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args: { API_INTERNAL_URL: http://api:4000 }
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    depends_on:
+      api: { condition: service_healthy }
+    ports: ["3000:3000"]
+
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,337 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum JobStatus {
+  DRAFT
+  PENDING_APPROVAL
+  SCHEDULED
+  PUBLISHED
+  EXPIRED
+  ARCHIVED
+}
+
+enum WorkMode {
+  REMOTE
+  WFH
+  HYBRID
+  ONSITE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+}
+
+enum SalaryType {
+  ANNUAL
+  MONTHLY
+  HOURLY
+}
+
+enum SourceType {
+  MANUAL
+  URL
+}
+
+enum TagCategory {
+  EXPERIENCE
+  WORK_MODE
+  EMPLOYMENT_TYPE
+  SKILL
+  QUALIFICATION
+  JOB_CATEGORY
+  OTHER
+}
+
+enum TagSource {
+  AUTO
+  MANUAL
+}
+
+enum ExtractionStatus {
+  QUEUED
+  FETCHING
+  EXTRACTING
+  READY
+  FAILED
+  PUBLISHED
+  DISCARDED
+}
+
+enum LogStatus {
+  SUCCESS
+  FAILURE
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(VIEWER)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  bookmarks    Bookmark[]
+  createdJobs  Job[]        @relation("JobCreatedBy")
+  approvedJobs Job[]        @relation("JobApprovedBy")
+  extractions  Extraction[]
+  auditLogs    AuditLog[]
+}
+
+model Company {
+  id             String   @id @default(cuid())
+  name           String
+  normalizedName String   @unique
+  website        String?
+  logoUrl        String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  jobs Job[]
+}
+
+model Job {
+  id                 String          @id @default(cuid())
+  companyId          String
+  title              String
+  normalizedTitle    String
+  location           String?
+  workMode           WorkMode?
+  employmentType     EmploymentType?
+  qualification      String?
+  experienceText     String?
+  minExperience      Float?
+  maxExperience      Float?
+  isFresherFriendly  Boolean         @default(false)
+  summary            String?
+  description        String?
+  responsibilities   String[]        @default([])
+  salaryMin          Float?
+  salaryMax          Float?
+  currency           String?
+  salaryType         SalaryType?
+  applicationUrl     String?
+  applicationUrlKey  String?
+  sourceUrl          String?
+  sourceUrlKey       String?
+  sourceWebsite      String?
+  deadline           DateTime?       @db.Date
+  walkInDate         DateTime?       @db.Date
+  postedDate         DateTime?       @db.Date
+  industry           String?
+  openings           Int?
+  status             JobStatus       @default(DRAFT)
+  sourceType         SourceType      @default(MANUAL)
+  publishedAt        DateTime?
+  scheduledAt        DateTime?
+  expiresAt          DateTime?
+  expiredAt          DateTime?
+  expiryReason       String?
+  archivedAt         DateTime?
+  generatedPost      String?
+  fieldMeta          Json?
+  /// Denormalised text (company, skills, tags, location...) indexed for full-text search.
+  searchText         String          @default("")
+  /// Maintained by the application (see SearchService.reindex).
+  searchVector       Unsupported("tsvector")?
+  createdById        String?
+  approvedById       String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  company     Company      @relation(fields: [companyId], references: [id])
+  createdBy   User?        @relation("JobCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy  User?        @relation("JobApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  skills      JobSkill[]
+  tags        JobTag[]
+  sources     JobSource[]
+  bookmarks   Bookmark[]
+  extractions Extraction[]
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([companyId])
+  @@index([normalizedTitle])
+  @@index([sourceUrlKey])
+  @@index([applicationUrlKey])
+  @@index([expiresAt])
+  @@index([searchVector], type: Gin)
+}
+
+model Skill {
+  id             String     @id @default(cuid())
+  name           String
+  normalizedName String     @unique
+  createdAt      DateTime   @default(now())
+  jobs           JobSkill[]
+}
+
+model JobSkill {
+  jobId       String
+  skillId     String
+  isPreferred Boolean @default(false)
+
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, skillId])
+  @@index([skillId])
+}
+
+model Tag {
+  id          String      @id @default(cuid())
+  name        String
+  slug        String
+  category    TagCategory
+  synonyms    String[]    @default([])
+  description String?
+  isActive    Boolean     @default(true)
+  isSystem    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  jobs JobTag[]
+
+  @@unique([category, slug])
+  @@index([isActive])
+}
+
+model JobTag {
+  jobId  String
+  tagId  String
+  source TagSource @default(AUTO)
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tag Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, tagId])
+  @@index([tagId])
+}
+
+model JobSource {
+  id                  String    @id @default(cuid())
+  jobId               String
+  sourceUrl           String
+  extractedContentHash String?
+  extractionTimestamp DateTime  @default(now())
+  lastVerifiedAt      DateTime?
+  lastVerifyStatus    String?
+  lastVerifyNote      String?
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+model Extraction {
+  id               String           @id @default(cuid())
+  sourceUrl        String
+  sourceUrlKey     String
+  status           ExtractionStatus @default(QUEUED)
+  forceBrowser     Boolean          @default(false)
+  fetchMethod      String?
+  httpStatus       Int?
+  contentHash      String?
+  pageTitle        String?
+  cleanedText      String?
+  result           Json?
+  error            String?
+  attempts         Int              @default(0)
+  submittedById    String?
+  jobId            String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  submittedBy User?           @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  job         Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  logs        ExtractionLog[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([sourceUrlKey])
+}
+
+model ExtractionLog {
+  id               String    @id @default(cuid())
+  extractionId     String?
+  sourceUrl        String
+  stage            String
+  status           LogStatus
+  provider         String?
+  model            String?
+  promptVersion    String?
+  promptTokens     Int       @default(0)
+  completionTokens Int       @default(0)
+  totalTokens      Int       @default(0)
+  estimatedCost    Float     @default(0)
+  durationMs       Int?
+  errorMessage     String?
+  createdAt        DateTime  @default(now())
+
+  extraction Extraction? @relation(fields: [extractionId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([extractionId])
+}
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  jobId     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([jobId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model Setting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
